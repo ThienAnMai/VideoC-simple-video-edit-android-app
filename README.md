@@ -7,9 +7,9 @@ Built using **Java** and **FFmpeg**, this app aims to overcome common keyframe l
 ## ✅ Features
 - [ ] Cut video segments without losing quality
 - [ ] Merge multiple videos seamlessly
-- [ ] Preserve original resolution and minimize re-encoding
-- [ ] Add video filters and effects
-
+- [ ] Split between keyframes
+- currently working on UI
+  
 ## 🛠 Tech Stack
 - **Language:** Java
 - **Framework:** Android SDK
