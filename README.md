@@ -1,1 +1,29 @@
 # VideoC-simple-video-edit-android-app
+
+## 📌 Overview
+An Android application for cutting and merging videos while maintaining original resolution and minimizing re-encoding.  
+Built using **Java** and **FFmpeg**, this app aims to overcome common keyframe limitations in video editing.
+
+## ✅ Features
+- [ ] Cut video segments without losing quality
+- [ ] Merge multiple videos seamlessly
+- [ ] Preserve original resolution and minimize re-encoding
+- [ ] Add video filters and effects
+
+## 🛠 Tech Stack
+- **Language:** Java
+- **Framework:** Android SDK
+- **Library:** FFmpeg
+- **Tools:** Android Studio, GitHub
+
+## ⚙️ Setup Instructions
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/ThienAnMai/VideoC-simple-video-edit-android-app.git
+2. Open in Android Studio and sync Gradle.
+3. Add FFmpeg binaries to the project.
+4. Build and run on an emulator or device.
+
+## 📜 License
+Open-source project for learning and portfolio purposes.
+
