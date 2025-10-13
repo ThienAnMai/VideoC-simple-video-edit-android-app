@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="ExoMediaButton.Previous" tools:override = "true">
+        <item name="android:visibility">gone</item>
+    </style>
+
+    <style name="ExoMediaButton.Next" tools:override = "true">
+        <item name="android:visibility">gone</item>
+    </style>
+
+</resources>
