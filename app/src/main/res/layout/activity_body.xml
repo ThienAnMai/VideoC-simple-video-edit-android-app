@@ -4,9 +4,39 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/black"
+    android:orientation="vertical"
     tools:context=".BodyActivity">
+
+    <LinearLayout
+        android:id="@+id/loadingContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#80000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:elevation="10dp"
+        tools:visibility="visible">
+
+        <ProgressBar
+            style="?android:attr/progressBarStyleLarge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/loadingStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Preparing videos..."
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+    </LinearLayout>
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/video_top_layout"
@@ -14,33 +44,35 @@
         android:layout_height="30dp"
         android:layout_margin="20dp"
         android:background="@color/black"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="0.0"
         app:layout_constraintStart_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" >
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
         <ImageView
             android:id="@+id/edit_complete_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_complete_white_24dp"
-            app:layout_constraintHorizontal_bias="1.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHorizontal_bias="1.0"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
+
         <ImageView
             android:id="@+id/edit_cancel_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_cancel_white_24dp"
-            app:layout_constraintHorizontal_bias="0.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHorizontal_bias="0.0"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
@@ -48,32 +80,32 @@
         android:id="@+id/video_loader"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:layout_marginStart="20dp"
         android:layout_marginTop="20dp"
         android:layout_marginEnd="20dp"
-        android:layout_marginStart="20dp"
+        app:layout_constraintBottom_toTopOf="@id/video_mid_layout"
         app:layout_constraintDimensionRatio="16:9"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/video_top_layout"
-        app:layout_constraintBottom_toTopOf="@id/video_mid_layout"
         app:layout_constraintVertical_bias="0.0"
-        app:use_controller="false"
         app:show_buffering="always"
-        app:show_previous_button="false"
         app:show_next_button="false"
-        />
+        app:show_previous_button="false"
+        app:use_controller="false" />
+
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/video_mid_layout"
         android:layout_width="match_parent"
         android:layout_height="30dp"
         android:layout_margin="20dp"
         android:background="@color/black"
-        app:layout_constraintHorizontal_bias="0.0"
-        app:layout_constraintVertical_bias="0.0"
-        app:layout_constraintTop_toBottomOf="@+id/video_loader"
         app:layout_constraintBottom_toTopOf="@+id/video_tool_layout"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" >
+        app:layout_constraintHorizontal_bias="0.0"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/video_loader"
+        app:layout_constraintVertical_bias="0.0">
 
         <ImageView
             android:id="@+id/video_play_btn"
@@ -83,10 +115,10 @@
             android:layout_alignParentBottom="true"
             android:background="@drawable/ic_play_arrow_white"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintHorizontal_bias="0.5"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintVertical_bias="0.0" />
 
         <ImageView
@@ -98,10 +130,10 @@
             android:background="@drawable/ic_pause_white"
             android:visibility="gone"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintHorizontal_bias="0.5"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintVertical_bias="0.0" />
 
         <ImageView
@@ -109,16 +141,14 @@
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_full_screen"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintHorizontal_bias="1.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintStart_toEndOf="@+id/video_play_btn" />
+            app:layout_constraintStart_toEndOf="@+id/video_play_btn"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
-
-
 
 
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -128,19 +158,19 @@
         android:layout_marginStart="20dp"
         android:layout_marginEnd="20dp"
         android:layout_marginBottom="20dp"
-        app:layout_constraintBottom_toTopOf="@+id/video_bot_layout"
-        >
+        app:layout_constraintBottom_toTopOf="@+id/video_bot_layout">
+
         <ImageView
             android:id="@+id/edit_undo_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_undo_white_24dp"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintHorizontal_bias="0.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintStart_toStartOf="parent" />
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
 
         <ImageView
             android:id="@+id/edit_redo_btn"
@@ -148,84 +178,85 @@
             android:layout_height="30dp"
             android:layout_marginStart="20dp"
             android:background="@drawable/ic_redo_white_24dp"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintHorizontal_bias="0.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintStart_toEndOf="@+id/edit_undo_btn" />
+            app:layout_constraintStart_toEndOf="@+id/edit_undo_btn"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
+
         <ImageView
             android:id="@+id/edit_delete_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_delete_white_24dp"
-            app:layout_constraintHorizontal_bias="0.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHorizontal_bias="0.0"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
 
         <ImageView
             android:id="@+id/edit_zoom_out_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_zoom_out_white_24dp"
-            app:layout_constraintHorizontal_bias="0.2"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toStartOf="@+id/edit_delete_btn"
+            app:layout_constraintHorizontal_bias="0.2"
             app:layout_constraintStart_toEndOf="@id/edit_zoom_in_btn"
-            app:layout_constraintEnd_toStartOf="@+id/edit_delete_btn" />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
+
         <ImageView
             android:id="@+id/edit_zoom_in_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_zoom_in_white_24dp"
-            app:layout_constraintHorizontal_bias="0.4"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/edit_delete_btn"
+            app:layout_constraintHorizontal_bias="0.4"
             app:layout_constraintStart_toEndOf="@id/edit_moveright_btn"
-            app:layout_constraintEnd_toStartOf="@id/edit_delete_btn" />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
 
         <ImageView
             android:id="@+id/edit_split_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:background="@drawable/ic_cut_white_24dp"
-            app:layout_constraintHorizontal_bias="0.5"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHorizontal_bias="0.5"
             app:layout_constraintStart_toStartOf="parent"
-            />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
+
         <ImageView
             android:id="@+id/edit_moveright_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:layout_marginStart="20dp"
             android:background="@drawable/ic_right_white_24dp"
-            app:layout_constraintHorizontal_bias="0.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHorizontal_bias="0.0"
             app:layout_constraintStart_toEndOf="@+id/edit_split_btn"
-            />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
+
         <ImageView
             android:id="@+id/edit_moveleft_btn"
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:layout_marginEnd="20dp"
             android:background="@drawable/ic_left_white_24dp"
-            app:layout_constraintHorizontal_bias="1.0"
-            app:layout_constraintVertical_bias="0.0"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toStartOf="@+id/edit_split_btn"
+            app:layout_constraintHorizontal_bias="1.0"
             app:layout_constraintStart_toStartOf="parent"
-            />
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.0" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
@@ -235,115 +266,114 @@
         android:layout_height="200dp"
         android:background="@color/black"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.0">
+        app:layout_constraintHorizontal_bias="0.0"
+        app:layout_constraintStart_toStartOf="parent">
+
 
         <HorizontalScrollView
-            android:id="@+id/video_edit_scroll_view"
-            android:layout_width="match_parent"
-            android:layout_marginStart="20dp"
-            android:layout_marginTop="0dp"
-            android:layout_marginEnd="20dp"
+            android:id="@+id/timeline_scroll_view"
+            android:layout_width="0dp"
             android:layout_height="100dp"
             android:scrollbars="none"
             android:clipToPadding="false"
-            android:paddingLeft="0dp"
-            android:paddingRight="0dp"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintVertical_bias="0.5">
 
+            <!-- 2. The Container for all timeline elements -->
             <FrameLayout
-                android:id="@+id/video_edit_child_frame_layout"
+                android:id="@+id/video_edit_container"
                 android:layout_width="wrap_content"
-                android:background="@drawable/border_round_trans"
                 android:layout_height="match_parent">
 
                 <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/video_time_line"
+                    android:id="@+id/segment_recycler_view"
                     android:layout_width="wrap_content"
                     android:layout_height="match_parent"
-                    android:orientation="horizontal" />
-
-                <LinearLayout
-                    android:id="@+id/video_frame_layout"
-                    android:layout_width="wrap_content"
-                    android:layout_height="match_parent"
-                    android:orientation="horizontal" />
+                    android:clipToPadding="false"
+                    android:orientation="horizontal"
+                    android:scrollbars="none" />
 
                 <View
                     android:id="@+id/selected_time_line_view"
-                    android:visibility="invisible"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:background="@drawable/border_round"
-                    />
+                    android:visibility="invisible" />
+
+                <FrameLayout
+                    android:id="@+id/separator_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
             </FrameLayout>
+
         </HorizontalScrollView>
-        <TextView
-            android:id="@+id/video_start_time_tv"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
-            android:textColor="#ffffff"
-            android:textSize="12sp"
-            app:layout_constraintBottom_toTopOf="@+id/video_edit_scroll_view"
-            app:layout_constraintEnd_toEndOf="@+id/video_edit_scroll_view"
-            app:layout_constraintHorizontal_bias="0.0"
-            app:layout_constraintStart_toStartOf="@+id/video_edit_scroll_view"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintVertical_bias="1.0"
-            tools:text="tetetetet" />
 
-        <EditText
-            android:id="@+id/video_current_time_tv"
-            android:layout_width="100dp"
-            android:layout_height="50dp"
-            android:layout_marginBottom="0dp"
-            android:gravity="center"
-            android:textColor="#ffffff"
-            android:textSize="12sp"
-            app:layout_constraintBottom_toTopOf="@+id/video_edit_scroll_view"
-            app:layout_constraintEnd_toStartOf="@id/video_end_time_tv"
-            app:layout_constraintHorizontal_bias="0.5"
-            app:layout_constraintStart_toEndOf="@id/video_start_time_tv"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintVertical_bias="1.0"
-            tools:text="tetetetet" />
+    <TextView
+        android:id="@+id/video_start_time_tv"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="20dp"
+        android:layout_marginBottom="10dp"
+        android:textColor="#ffffff"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toTopOf="@+id/timeline_scroll_view"
+        app:layout_constraintEnd_toEndOf="@+id/timeline_scroll_view"
+        app:layout_constraintHorizontal_bias="0.0"
+        app:layout_constraintStart_toStartOf="@+id/timeline_scroll_view"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="1.0"
+        tools:text="tetetetet" />
 
-        <TextView
-            android:id="@+id/video_end_time_tv"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_alignParentStart="true"
-            android:layout_marginEnd="20dp"
-            android:layout_marginBottom="10dp"
-            android:gravity="end"
-            android:textColor="#ffffff"
-            android:textSize="12sp"
-            app:layout_constraintBottom_toTopOf="@+id/video_edit_scroll_view"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintHorizontal_bias="1.0"
-            app:layout_constraintStart_toEndOf="@+id/video_start_time_tv"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintVertical_bias="1.0"
-            tools:text="tetetetet" />
+    <EditText
+        android:id="@+id/video_current_time_tv"
+        android:layout_width="100dp"
+        android:layout_height="50dp"
+        android:layout_marginBottom="0dp"
+        android:gravity="center"
+        android:textColor="#ffffff"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toTopOf="@+id/timeline_scroll_view"
+        app:layout_constraintEnd_toStartOf="@id/video_end_time_tv"
+        app:layout_constraintHorizontal_bias="0.5"
+        app:layout_constraintStart_toEndOf="@id/video_start_time_tv"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="1.0"
+        tools:text="tetetetet" />
 
-        <ImageView
-            android:id="@+id/white_line"
-            android:layout_width="2dp"
-            android:layout_height="110dp"
-            android:background="@drawable/thumb"
-            android:layout_gravity="center_vertical"
-            app:layout_constraintBottom_toBottomOf="@+id/video_edit_scroll_view"
-            app:layout_constraintEnd_toEndOf="@+id/video_edit_scroll_view"
-            app:layout_constraintStart_toStartOf="@+id/video_edit_scroll_view"
-            app:layout_constraintTop_toTopOf="@+id/video_edit_scroll_view" />
-    </androidx.constraintlayout.widget.ConstraintLayout>
+    <TextView
+        android:id="@+id/video_end_time_tv"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_marginEnd="20dp"
+        android:layout_marginBottom="10dp"
+        android:gravity="end"
+        android:textColor="#ffffff"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toTopOf="@+id/timeline_scroll_view"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="1.0"
+        app:layout_constraintStart_toEndOf="@+id/video_start_time_tv"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="1.0"
+        tools:text="tetetetet" />
 
-
-
+    <ImageView
+        android:id="@+id/white_line"
+        android:layout_width="2dp"
+        android:layout_height="110dp"
+        android:layout_gravity="center_vertical"
+        android:background="@drawable/thumb"
+        app:layout_constraintBottom_toBottomOf="@+id/timeline_scroll_view"
+        app:layout_constraintEnd_toEndOf="@+id/timeline_scroll_view"
+        app:layout_constraintStart_toStartOf="@+id/timeline_scroll_view"
+        app:layout_constraintTop_toTopOf="@+id/timeline_scroll_view" />
 </androidx.constraintlayout.widget.ConstraintLayout>
+
+
+    </androidx.constraintlayout.widget.ConstraintLayout>

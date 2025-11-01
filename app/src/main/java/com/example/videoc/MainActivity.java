@@ -100,8 +100,8 @@ public class MainActivity extends AppCompatActivity {
     private void startBodyActivity(ArrayList<Uri> uriArrayList) {
         Intent intent = new Intent(this, BodyActivity.class);
         intent.putParcelableArrayListExtra("uriArrayList", uriArrayList);
-        //path = UriUtils.getRealPathFromURI(this, uri);
-        //intent.putExtra("path", path);
+
+        //intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         startActivity(intent);
     }
     ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(

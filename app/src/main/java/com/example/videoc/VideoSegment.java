@@ -1,6 +1,5 @@
 package com.example.videoc;
 
-import android.content.Intent;
 import android.net.Uri;
 
 public class VideoSegment {
@@ -10,56 +9,45 @@ public class VideoSegment {
     long clippingStart;
     long clippingEnd;
     Uri uri;
-    int width = 1;
-    int startPosition = 0;
-    long frameInterval = 10000;
+    int width;
+    int height;
+
 
     public VideoSegment() {
     }
 
-    public VideoSegment(Uri uri, long startTime, long duration) {
+    public VideoSegment(Uri uri, long startTime, long duration, int width, int height) {
         this.startTime = startTime;
         this.duration = duration;
         this.endTime = startTime + duration;
         this.uri = uri;
+        this.width = width;
+        this.height = height;
         this.clippingStart = 0;
         this.clippingEnd = this.clippingStart + this.duration;
-        setUpIniInterval(duration);
     }
 
-    public VideoSegment(Uri uri, long startTime, long duration, long clippingStart) {
+    public VideoSegment(Uri uri, long startTime, long duration, long clippingStart, int width, int height) {
         this.startTime = startTime;
         this.duration = duration;
         this.endTime = startTime + duration;
         this.uri = uri;
+        this.width = width;
+        this.height = height;
         this.clippingStart = clippingStart;
         this.clippingEnd = this.clippingStart + this.duration;
-        setUpIniInterval(duration);
     }
-    public VideoSegment(Uri uri, long startTime, long duration, long clippingStart, long clippingEnd) {
+    public VideoSegment(Uri uri, long startTime, long duration, long clippingStart, long clippingEnd, int width, int height) {
         this.startTime = startTime;
         this.duration = duration;
         this.endTime = startTime + duration;
         this.uri = uri;
+        this.width = width;
+        this.height = height;
         this.clippingStart = clippingStart;
         this.clippingEnd = clippingEnd;
-        setUpIniInterval(duration);
     }
 
-
-    private void setUpIniInterval(long duration){
-        if(duration >= 3600000){
-            this.frameInterval = 600000;
-        } else if (duration >= 1800000) {
-            this.frameInterval = 300000;
-        } else if (duration >= 600000) {
-            this.frameInterval = 60000;            
-        } else if (duration >= 120000) {
-            this.frameInterval = 20000;
-        } else if (duration >= 30000) {
-            this.frameInterval = 5000;
-        } else this.frameInterval = duration;
-    }
 
     public long getStartTime() {
         return startTime;
@@ -68,7 +56,6 @@ public class VideoSegment {
     public void setStartTime(long startTime) {
         this.startTime = startTime;
         this.duration = this.endTime-startTime;
-        setUpIniInterval(this.duration);
     }
 
     public long getEndTime() {
@@ -78,12 +65,8 @@ public class VideoSegment {
     public void setEndTime(long endTime) {
         this.endTime = endTime;
         this.duration = endTime - this.startTime;
-        setUpIniInterval(this.duration);
     }
 
-    public long getFrameInterval() {
-        return frameInterval;
-    }
 
     public long getDuration() {
         return duration;
@@ -92,7 +75,6 @@ public class VideoSegment {
     public void setDuration(long duration) {
         this.duration = duration;
         this.endTime = this.startTime + duration;
-        setUpIniInterval(duration);
     }
 
     public long getClippingStart() {
@@ -127,11 +109,11 @@ public class VideoSegment {
         this.width = width;
     }
 
-    public int getStartPosition() {
-        return startPosition;
+    public int getHeight() {
+        return height;
     }
 
-    public void setStartPosition(int startPosition) {
-        this.startPosition = startPosition;
+    public void setHeight(int height) {
+        this.height = height;
     }
 }
