@@ -1,7 +1,6 @@
 package com.example.videoc;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -10,21 +9,21 @@ import android.os.Environment;
 import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.media3.common.util.UnstableApi;
 
-import java.util.ArrayList;
-
+@UnstableApi
 public class MainActivity extends AppCompatActivity {
 
-    private static final int STORAGE_PERMISSION_CODE = 1;
     TextView text;
     Button addButton;
-    private Context mContext;
+    FrameLayout loadingOverlay;
 
     public String path;
 
@@ -35,6 +34,7 @@ public class MainActivity extends AppCompatActivity {
         hideSystemUI();
 
         text = findViewById(R.id.text);
+        loadingOverlay = findViewById(R.id.loadingOverlay);
         addButton = findViewById(R.id.addButton);
         addButton.setOnClickListener(view -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -56,6 +56,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        Button settingsButton = findViewById(R.id.settingsButton);
+        settingsButton.setOnClickListener(v -> {
+            Intent intent = new Intent(MainActivity.this, SettingsActivity.class);
+            startActivity(intent);
+        });
+
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
     }
 
     @Override
@@ -92,40 +103,41 @@ public class MainActivity extends AppCompatActivity {
         intent.setType("video/*");
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         try {
+            loadingOverlay.setVisibility(View.VISIBLE); // Show the loading screen
             activityResultLauncher.launch(Intent.createChooser(intent, "Select a file"));
         } catch (Exception e){
             Toast.makeText(this, "File manager not exist", Toast.LENGTH_SHORT).show();
         }
     }
-    private void startBodyActivity(ArrayList<Uri> uriArrayList) {
-        Intent intent = new Intent(this, BodyActivity.class);
-        intent.putParcelableArrayListExtra("uriArrayList", uriArrayList);
 
-        //intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        startActivity(intent);
-    }
+    ActivityResultLauncher<Intent> bodyActivityLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                // This code runs when BodyActivity finishes.
+                loadingOverlay.setVisibility(View.GONE); // Always hide the loading screen on return
+
+                // You can check the result code to see if the user saved or canceled
+                if (result.getResultCode() == Activity.RESULT_OK) {
+                    // TODO: Add code here for when the user successfully completes the edit
+                    Toast.makeText(this, "Video Saved!", Toast.LENGTH_SHORT).show();
+                } else {
+                    // TODO: Add code here for when the user cancels or presses back
+                    Toast.makeText(this, "Editing Canceled", Toast.LENGTH_SHORT).show();
+                }
+            }
+    );
+
     ActivityResultLauncher<Intent> activityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
-                if (result.getResultCode() == Activity.RESULT_OK) {
-                    // There are no request codes
-                    ArrayList<Uri> uriArrayList = new ArrayList<>();
-                    if (result.getData() != null) {
-                        if (result.getData().getClipData() != null) {
-                            // User selected multiple files
-                            for (int i = 0; i < result.getData().getClipData().getItemCount(); i++) {
-                                Uri uri = result.getData().getClipData().getItemAt(i).getUri();
-                                uriArrayList.add(uri);
-                            }
-                        } else if (result.getData().getData() != null) {
-                            // User selected a single file
-                            Uri uri = result.getData().getData();
-                            uriArrayList.add(uri);
-                        }
-                    }
-                    startBodyActivity(uriArrayList);
-
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                    // Create a new intent for BodyActivity and pass the result data directly.
+                    Intent bodyIntent = new Intent(MainActivity.this, BodyActivity.class);
+                    bodyIntent.putExtra("result_data", result.getData()); // Pass the entire data object
+                    bodyActivityLauncher.launch(bodyIntent);
+                    overridePendingTransition(0, 0);
                 }
+                else loadingOverlay.setVisibility(View.GONE);
             });
 
     ActivityResultLauncher<Intent> storageActivityResultLauncher = registerForActivityResult(
@@ -143,6 +155,8 @@ public class MainActivity extends AppCompatActivity {
 
                 }
             });
+
+
 
 
 }

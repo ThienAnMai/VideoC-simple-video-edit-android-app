@@ -15,13 +15,10 @@ import android.os.SystemClock;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.util.Log;
-import android.widget.TextView;
 import android.widget.Toast;
-import android.content.Context;
 
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
@@ -52,8 +49,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
+import com.arthenica.ffmpegkit.FFmpegSessionCompleteCallback;
+import com.arthenica.ffmpegkit.ReturnCode;
 import com.example.videoc.databinding.ActivityBodyBinding;
 
 import java.io.File;
@@ -69,8 +67,6 @@ import java.util.concurrent.TimeUnit;
 @UnstableApi public class BodyActivity extends AppCompatActivity implements SegmentAdapter.ThumbnailGenerator {
     //-------------initiate---------------
     ExoPlayer exoPlayer;
-    MediaItem mediaItem;
-    Uri uri;
     ArrayList<Uri> uriArrayList;
     Context context;
     ActivityBodyBinding binding;
@@ -84,12 +80,12 @@ import java.util.concurrent.TimeUnit;
     private SimpleCache exoPlayerCache;
     private CacheDataSource.Factory cacheDataSourceFactory;
     private long currentTime = 0;
-    final int[] currentWidth = {0};
+
     private Handler handler;
-    List<Bitmap> frameList;
+
     private double pixelsPerSecond = 50.0; // Initial zoom level. e.g., 50 pixels represents 1 second.
     // A cache to store generated thumbnails. Key: "uri_timestamp", Value: Bitmap
-    private static LruCache<String, Bitmap> thumbnailCache;
+    private LruCache<String, Bitmap> thumbnailCache;
     // For running background tasks like caching and thumbnail generation
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(2); // 2 threads for parallel tasks
     // For posting results back to the main UI thread
@@ -102,10 +98,13 @@ import java.util.concurrent.TimeUnit;
         super.onCreate(savedInstanceState);
         context = this;
         binding = ActivityBodyBinding.inflate(getLayoutInflater());
+
+        // Show the loading screen before starting any tasks
+        binding.loadingContainer.setVisibility(View.VISIBLE);
+
         setContentView(binding.getRoot());
         hideSystemUI();
 
-        // --- INITIALIZE THE THUMBNAIL CACHE ---
         // Get max available VM memory, exceeding this amount will throw an
         // OutOfMemory exception. Stored in kilobytes.
         final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
@@ -121,7 +120,6 @@ import java.util.concurrent.TimeUnit;
                 return bitmap.getByteCount() / 1024;
             }
         };
-        // --- END INITIALIZATION ---
 
         iniSegment();
         setUpPlayer();
@@ -142,7 +140,6 @@ import java.util.concurrent.TimeUnit;
         super.onDestroy();
         Log.d("Cleanup", "onDestroy called.");
         binding.videoLoader.removeCallbacks(null);
-        cleanupAndFinish();
 
         // Release resources that might still be held if cleanupAndFinish wasn't called.
         // This acts as a final safety net.
@@ -205,7 +202,6 @@ import java.util.concurrent.TimeUnit;
     //---------Player--------------
     private void setUpPlayer(){
 
-        //uri = getIntent().getParcelableExtra("uri");
 
         if(videoSegmentList != null){
             // 1. Create a single cache instance.
@@ -225,6 +221,8 @@ import java.util.concurrent.TimeUnit;
                         .setCache(exoPlayerCache)
                         .setUpstreamDataSourceFactory(new DefaultDataSource.Factory(this));
             }
+
+            startPreloadingTasks(); //start preload task for cache
             // --- END CACHING SETUP ---
 
             // 3. Build ExoPlayer using the caching factory.
@@ -237,8 +235,6 @@ import java.util.concurrent.TimeUnit;
 
             setUpPlayerMedia();
             exoPlayer.setPlayWhenReady(false);
-
-            startPreloadingTasks(); //start preload task for cache
 
             exoPlayer.addListener(new Player.Listener() {
                 @Override
@@ -322,9 +318,7 @@ import java.util.concurrent.TimeUnit;
     }
     //-------cache----------------
     private void startPreloadingTasks() {
-        // Show the loading screen before starting any tasks
-        binding.loadingContainer.setVisibility(View.VISIBLE);
-        binding.timelineScrollView.setEnabled(false);
+
 
         // Task 1: Pre-cache videos in the background
         Future<?> videoCachingFuture = backgroundExecutor.submit(() -> {
@@ -336,12 +330,16 @@ import java.util.concurrent.TimeUnit;
                     // Post progress updates to the main thread
                     mainThreadHandler.post(() -> binding.loadingStatusText.setText(progressText));
 
-                    DataSpec dataSpec = new DataSpec(segment.getUri());
+                    DataSpec dataSpec = new DataSpec.Builder()
+                            .setUri(segment.getUri())
+                            .setLength(C.LENGTH_UNSET) // Tell the cache to resolve the length automatically
+                            .build();
+
                     CacheWriter cacheWriter = new CacheWriter(
                             cacheDataSourceFactory.createDataSource(),
                             dataSpec,
-                            null,
-                            null // Progress listener
+                            null, // You can pass a byte array here if needed, but null is fine
+                            null  // Progress listener
                     );
                     cacheWriter.cache(); // Blocking call
                     Log.d("PreCache", "Finished caching: " + segment.getUri());
@@ -386,6 +384,22 @@ import java.util.concurrent.TimeUnit;
 
     //-------thumbnail------------
 
+    private void rebuildTimelineAndPlayer() {
+        if (exoPlayer == null) return;
+
+        // 1. Rebuild the player's playlist with the new segment order and timings
+        setUpPlayerMedia();
+
+        // 2. Tell the adapter that the data has fundamentally changed
+        // This will redraw the thumbnails in the new order.
+        segmentAdapter.setSegments(videoSegmentList);
+
+        // 3. Redraw the separator lines at their new positions
+        updateSeparateLine();
+
+        // 4. Update the selection highlight to follow the moved segment
+        setUpSelectedSegment();
+    }
     private long getTotalDuration() {
         long total = 0;
         for (VideoSegment segment : videoSegmentList) {
@@ -533,32 +547,39 @@ import java.util.concurrent.TimeUnit;
     }
 
     //----------segment--------------------
-    private void iniSegment(){
-        uriArrayList = new ArrayList<>();
-        uriArrayList = getIntent().getParcelableArrayListExtra("uriArrayList");
-
-        videoSegmentList = new ArrayList<VideoSegment>();
-        //videoSegmentList.clear();
-        long startTime = 0;
-        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-
-        // --- Establish Project Dimensions ---
-        int projectWidth = -1;
-        int projectHeight = -1;
-
-        for(Uri uri:uriArrayList){
-            retriever.setDataSource(context, uri);
-            long duration = Long.parseLong(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION));
-            int videoWidth = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
-            int videoHeight = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
-
-            videoSegmentList.add(new VideoSegment(uri, startTime, duration, videoWidth, videoHeight));
-            startTime += duration;
+    private void iniSegment() {
+        videoSegmentList = new ArrayList<>();
+        Intent resultData = getIntent().getParcelableExtra("result_data");
+        if (resultData != null) {
+            if (resultData.getClipData() != null) {
+                // User selected multiple files
+                for (int i = 0; i < resultData.getClipData().getItemCount(); i++) {
+                    addVideoSegment(resultData.getClipData().getItemAt(i).getUri());
+                }
+            } else if (resultData.getData() != null) {
+                // User selected a single file
+                addVideoSegment(resultData.getData());
+            }
         }
+    }
+
+    private void addVideoSegment(Uri uri) {
         try {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            retriever.setDataSource(this, uri);
+            String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            String widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+            String heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+
+            long durationMs = Long.parseLong(durationStr);
+            int width = Integer.parseInt(widthStr);
+            int height = Integer.parseInt(heightStr);
+
+            // Create a segment that uses the entire original video clip
+            videoSegmentList.add(new VideoSegment(uri, 0, durationMs, width, height));
             retriever.release();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        } catch (Exception e) {
+            Log.e("URI", "Failed to add video segment for URI: " + uri, e);
         }
     }
     private void setUpSelectedSegment(){
@@ -600,6 +621,7 @@ import java.util.concurrent.TimeUnit;
         } else {
             // If no segment is active (e.g., time is out of bounds), hide the view
             binding.selectedTimeLineView.setVisibility(View.INVISIBLE);
+            selectedSegment = null;
         }
 
     }
@@ -657,18 +679,7 @@ import java.util.concurrent.TimeUnit;
             // Swap the segments in the list
             Collections.swap(videoSegmentList, currentIndex, newIndex);
 
-            // Recalculate the start times for all segments
-            long cumulativeTime = 0;
-            for (VideoSegment segment : videoSegmentList) {
-                segment.setStartTime(cumulativeTime);
-                cumulativeTime += segment.getDuration();
-            }
-
-            // Refresh the UI completely
-            setUpPlayerMedia();
-            segmentAdapter.setSegments(videoSegmentList); // Use the dedicated method to update adapter data
-            updateSeparateLine();
-            setUpSelectedSegment();
+            rebuildTimelineAndPlayer();
         }
     }
 
@@ -682,29 +693,20 @@ import java.util.concurrent.TimeUnit;
         int segmentIndex = videoSegmentList.indexOf(segmentToCut);
         if (segmentIndex == -1) return;
 
-        // Create the new segment that represents the second half
+        long cutTimeInSource = segmentToCut.getClippingStart() + cutTimeInSegment;
+        long originalClippingEnd = segmentToCut.getClippingEnd();
+
+        segmentToCut.setClippingEnd(cutTimeInSource);
+
         VideoSegment newSegment = new VideoSegment(
                 segmentToCut.getUri(),
-                segmentToCut.getStartTime() + cutTimeInSegment,
-                segmentToCut.getDuration() - cutTimeInSegment,
-                segmentToCut.getClippingStart() + cutTimeInSegment, // Adjust clipping start
+                cutTimeInSource,         // The new start is the cut time.
+                originalClippingEnd,     // The end is the original end.
                 segmentToCut.getWidth(),
                 segmentToCut.getHeight()
         );
-        newSegment.setClippingEnd(segmentToCut.getClippingEnd()); // Clipping end remains the same relative to original video
-
-        // Update the original segment to be the first half
-        segmentToCut.setDuration(cutTimeInSegment);
-        segmentToCut.setClippingEnd(segmentToCut.getClippingStart() + cutTimeInSegment);
-
-        // Add the new segment to the list right after the original one
         videoSegmentList.add(segmentIndex + 1, newSegment);
-
-        // Refresh everything
-        setUpPlayerMedia();
-        segmentAdapter.setSegments(videoSegmentList);
-        updateSeparateLine();
-        setUpSelectedSegment();
+        rebuildTimelineAndPlayer();
         exoPlayer.pause();
     }
 
@@ -716,19 +718,8 @@ import java.util.concurrent.TimeUnit;
         }
 
         videoSegmentList.remove(segmentToDelete);
-
-        // Recalculate start times
-        long cumulativeTime = 0;
-        for (VideoSegment segment : videoSegmentList) {
-            segment.setStartTime(cumulativeTime);
-            cumulativeTime += segment.getDuration();
-        }
-
         // Refresh everything
-        setUpPlayerMedia();
-        segmentAdapter.setSegments(videoSegmentList);
-        updateSeparateLine();
-        setUpSelectedSegment();
+        rebuildTimelineAndPlayer();
     }
     //------------Buttons--------------
     private void setUpBtns(){
@@ -751,7 +742,7 @@ import java.util.concurrent.TimeUnit;
 
 
         binding.editCancelBtn.setOnClickListener(view -> cleanupAndFinish());
-        binding.editCompleteBtn.setOnClickListener(view -> onBackPressed());
+        binding.editCompleteBtn.setOnClickListener(view -> complete());
 
         binding.videoFullscreenBtn.setOnClickListener(view -> {
             startVideoPlayerActivity(getIntent().getParcelableExtra("uri"));
@@ -759,8 +750,15 @@ import java.util.concurrent.TimeUnit;
 
         binding.editSplitBtn.setOnClickListener(view -> {
             if (selectedSegment != null) {
-                // Calculate the cut time relative to the start of the selected segment
-                long cutTimeInSegment = currentTime - selectedSegment.getStartTime();
+                long segmentStartTimeInTimeline = 0;
+                for (VideoSegment segment : videoSegmentList) {
+                    if (segment == selectedSegment) {
+                        break; // Found the start of our segment
+                    }
+                    segmentStartTimeInTimeline += segment.getDuration();
+                }
+
+                long cutTimeInSegment = currentTime - segmentStartTimeInTimeline;
                 cutSegment(selectedSegment, cutTimeInSegment);
             }
         });
@@ -801,9 +799,9 @@ import java.util.concurrent.TimeUnit;
         // Format the duration as hh:mm:ss.ms
         return String.format("%02d:%02d:%02d.%03d", hours, minutes, seconds, milliseconds);
     }
-    //--------------stop------------------------
-    private void cleanupAndFinish() {
-        Log.d("Cleanup", "Starting cleanup process...");
+    //--------------Clean Up------------------------
+    private void releaseResources() {
+        Log.d("Cleanup", "Releasing resources...");
 
 
         // 1. Stop all background tasks immediately
@@ -820,10 +818,10 @@ import java.util.concurrent.TimeUnit;
             exoPlayer = null;
         }
         // 3. Clear the thumbnail cache to free up memory
-        if (thumbnailCache != null) {
-            Log.d("Cleanup", "Evicting all thumbnails from memory cache.");
-            thumbnailCache.evictAll();
-        }
+//        if (thumbnailCache != null) {
+//            Log.d("Cleanup", "Evicting all thumbnails from memory cache.");
+//            thumbnailCache.evictAll();
+//        }
         // 4. Release the SimpleCache (disk cache)
         // This closes the database connection and file handles.
         if (exoPlayerCache != null) {
@@ -831,9 +829,82 @@ import java.util.concurrent.TimeUnit;
             exoPlayerCache.release();
             exoPlayerCache = null;
         }
-        // 5. Finally, finish the activity
-        finish();
 
+    }
+
+    private void cleanupAndFinish() {
+        Log.d("Cleanup", "User initiated exit. Cleaning up and finishing.");
+        releaseResources(); // Call the resource cleanup
+        setResult(Activity.RESULT_CANCELED); // Set the result for the parent
+        finish(); // Finish the activity
+    }
+
+    private void complete(){
+        // 1. Show a loading screen and disable buttons to prevent re-entry
+        binding.loadingContainer.setVisibility(View.VISIBLE);
+        binding.loadingStatusText.setText("Processing video...");
+        setAllButtonsEnabled(false);
+
+        // 2. Define the output file path
+        SettingsManager settingsManager = new SettingsManager(this);
+        String outputDirectoryPath = settingsManager.getOutputPath();
+        File outputDir = new File(outputDirectoryPath);
+
+        if (!outputDir.exists()) {
+            outputDir.mkdirs(); // Create the directory if it doesn't exist
+        }
+
+        String outputVideoPath = new File(outputDir, "final_video_" + System.currentTimeMillis() + ".mp4").getAbsolutePath();
+        // 3. Create the callback for when FFmpeg finishes the entire process
+        FFmpegSessionCompleteCallback ffmpegCallback = session -> {
+            if (ReturnCode.isSuccess(session.getReturnCode())) {
+                // SUCCESS
+                Log.i("VideoProcUtils", "Smart render completed successfully to:" + outputVideoPath);
+                runOnUiThread(() -> {
+                    Toast.makeText(BodyActivity.this, "Video saved to: " + outputVideoPath, Toast.LENGTH_LONG).show();
+
+                    // Set the result to OK for MainActivity
+                    Intent resultIntent = new Intent();
+                    resultIntent.putExtra("video_path", outputVideoPath);
+                    setResult(Activity.RESULT_OK, resultIntent);
+
+                    // Clean up resources and finish the activity
+                    cleanupAndFinish();
+                });
+            } else {
+                // FAILURE
+                Log.e("VideoProcUtils", String.format("Smart render failed with state %s and rc %s.%s", session.getState(), session.getReturnCode(), session.getFailStackTrace()));
+                runOnUiThread(() -> {
+                    Toast.makeText(BodyActivity.this, "Error processing video.", Toast.LENGTH_LONG).show();
+                    // Hide loading screen and re-enable buttons on failure
+                    binding.loadingContainer.setVisibility(View.GONE);
+                    setAllButtonsEnabled(true);
+                });
+            }
+        };
+
+        // 4. Execute the smart render process
+        // Your VideoProcUtils method expects an ArrayList, so we create one from our list.
+        ArrayList<VideoSegment> segmentsToProcess = new ArrayList<>(videoSegmentList);
+        VideoProcUtils.execute(BodyActivity.this, segmentsToProcess, outputVideoPath, ffmpegCallback);
+
+        //setResult(Activity.RESULT_OK);
+        //finish();
+    }
+
+    private void setAllButtonsEnabled(boolean isEnabled) {
+        binding.editCompleteBtn.setEnabled(isEnabled);
+        binding.editCancelBtn.setEnabled(isEnabled);
+        binding.editSplitBtn.setEnabled(isEnabled);
+        binding.editDeleteBtn.setEnabled(isEnabled);
+        binding.editMoveleftBtn.setEnabled(isEnabled);
+        binding.editMoverightBtn.setEnabled(isEnabled);
+        binding.editZoomInBtn.setEnabled(isEnabled);
+        binding.editZoomOutBtn.setEnabled(isEnabled);
+        binding.videoPlayBtn.setEnabled(isEnabled);
+        binding.videoPauseBtn.setEnabled(isEnabled);
+        binding.videoFullscreenBtn.setEnabled(isEnabled);
+        // Add any other buttons or interactive views here
     }
 
         //--------------new activity---------------------

@@ -271,7 +271,7 @@
         app:layout_constraintStart_toStartOf="parent">
 
 
-        <HorizontalScrollView
+        <com.example.videoc.NonFlingScrollView
             android:id="@+id/timeline_scroll_view"
             android:layout_width="0dp"
             android:layout_height="100dp"
@@ -311,7 +311,7 @@
 
             </FrameLayout>
 
-        </HorizontalScrollView>
+        </com.example.videoc.NonFlingScrollView>
 
     <TextView
         android:id="@+id/video_start_time_tv"
