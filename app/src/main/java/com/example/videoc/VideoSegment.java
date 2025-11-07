@@ -1,17 +1,17 @@
 package com.example.videoc;
 
 import android.net.Uri;
+import android.os.Parcel;
+import android.os.Parcelable;
 
-public class VideoSegment {
+import androidx.annotation.NonNull;
+
+public class VideoSegment implements Parcelable {
     long clippingStart;
     long clippingEnd;
     Uri uri;
     int width;
     int height;
-
-
-    public VideoSegment() {
-    }
 
     public VideoSegment(Uri uri, long clippingStart, long clippingEnd, int width, int height) {
         this.uri = uri;
@@ -20,6 +20,40 @@ public class VideoSegment {
         this.clippingEnd = clippingEnd;
         this.width = width;
         this.height = height;
+    }
+
+    protected VideoSegment(Parcel in) {
+        clippingStart = in.readLong();
+        clippingEnd = in.readLong();
+        uri = in.readParcelable(Uri.class.getClassLoader());
+        width = in.readInt();
+        height = in.readInt();
+    }
+
+    public static final Creator<VideoSegment> CREATOR = new Creator<VideoSegment>() {
+        @Override
+        public VideoSegment createFromParcel(Parcel in) {
+            return new VideoSegment(in);
+        }
+
+        @Override
+        public VideoSegment[] newArray(int size) {
+            return new VideoSegment[size];
+        }
+    };
+
+    @Override
+    public int describeContents() {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(@NonNull Parcel parcel, int i) {
+        parcel.writeLong(clippingStart);
+        parcel.writeLong(clippingEnd);
+        parcel.writeParcelable(uri, i);
+        parcel.writeInt(width);
+        parcel.writeInt(height);
     }
 
     public long getDuration() {
@@ -65,4 +99,5 @@ public class VideoSegment {
     public void setHeight(int height) {
         this.height = height;
     }
+
 }

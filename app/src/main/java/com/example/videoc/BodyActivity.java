@@ -64,16 +64,20 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-@UnstableApi public class BodyActivity extends AppCompatActivity implements SegmentAdapter.ThumbnailGenerator {
-    //-------------initiate---------------
+@UnstableApi
+public class BodyActivity extends AppCompatActivity implements SegmentAdapter.ThumbnailGenerator {
+    /**
+    *----------------------------------------------------------------------------------------------------
+    *-----------------------------------INITIATE-Variables-----------------------------------------------
+    *----------------------------------------------------------------------------------------------------
+    */
     ExoPlayer exoPlayer;
-    ArrayList<Uri> uriArrayList;
     Context context;
     ActivityBodyBinding binding;
     private GestureDetector gestureDetector;
-    private long startTime;
+    private MyGestureListener myGestureListener;
+    private List<VideoSegment> videoSegmentList;
     int currentVolume;
-    List<VideoSegment> videoSegmentList;
     ConcatenatingMediaSource2 mediaSource;
     private SegmentAdapter segmentAdapter;
     VideoSegment selectedSegment;
@@ -81,18 +85,28 @@ import java.util.concurrent.TimeUnit;
     private CacheDataSource.Factory cacheDataSourceFactory;
     private long currentTime = 0;
 
-    private Handler handler;
-
     private double pixelsPerSecond = 50.0; // Initial zoom level. e.g., 50 pixels represents 1 second.
-    // A cache to store generated thumbnails. Key: "uri_timestamp", Value: Bitmap
-    private LruCache<String, Bitmap> thumbnailCache;
+
     // For running background tasks like caching and thumbnail generation
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(2); // 2 threads for parallel tasks
     // For posting results back to the main UI thread
     private final Handler mainThreadHandler = new Handler(Looper.getMainLooper());
+    private int timelineHeightPx = 1;
+    private final ThreadLocal<MediaMetadataRetriever> retrieverThreadLocal =
+            new ThreadLocal<MediaMetadataRetriever>() {
+                @Override
+                protected MediaMetadataRetriever initialValue() {
+                    // This method is called once per thread to create the instance
+                    Log.d("ThumbnailGen", "Creating new MediaMetadataRetriever for thread: " + Thread.currentThread().getName());
+                    return new MediaMetadataRetriever();
+                }
+            };
 
-
-    // ----------Body Activity-------------
+    /**
+    *----------------------------------------------------------------------------------------------------
+    *-----------------------------------INITIATE-functions-----------------------------------------------
+    *----------------------------------------------------------------------------------------------------
+    */
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -105,29 +119,12 @@ import java.util.concurrent.TimeUnit;
         setContentView(binding.getRoot());
         hideSystemUI();
 
-        // Get max available VM memory, exceeding this amount will throw an
-        // OutOfMemory exception. Stored in kilobytes.
-        final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
-
-        // Use 1/8th of the available memory for this memory cache.
-        final int cacheSize = maxMemory / 8;
-
-        thumbnailCache = new LruCache<String, Bitmap>(cacheSize) {
-            @Override
-            protected int sizeOf(String key, Bitmap bitmap) {
-                // The cache size will be measured in kilobytes rather than number of items.
-                // This is crucial for managing memory with images of different sizes.
-                return bitmap.getByteCount() / 1024;
-            }
-        };
-
         iniSegment();
         setUpPlayer();
 
+        myGestureListener = new MyGestureListener();
+        gestureDetector = new GestureDetector(this, myGestureListener);
 
-        handler = new Handler(Looper.getMainLooper());
-
-        gestureDetector = new GestureDetector(this, new MyGestureListener());
 
         updateSeparateLine();
         setUpBtns();
@@ -140,7 +137,6 @@ import java.util.concurrent.TimeUnit;
         super.onDestroy();
         Log.d("Cleanup", "onDestroy called.");
         binding.videoLoader.removeCallbacks(null);
-
         // Release resources that might still be held if cleanupAndFinish wasn't called.
         // This acts as a final safety net.
         if (backgroundExecutor != null && !backgroundExecutor.isShutdown()) {
@@ -157,49 +153,109 @@ import java.util.concurrent.TimeUnit;
     }
 
     @Override
-    protected void onStop() {
-        super.onStop();
+    public Bitmap generateThumbnail(Uri uri, long timestampMs, int width, int height) {
+        MediaMetadataRetriever retriever = retrieverThreadLocal.get();
+        try {
+            // The retriever is already initialized.
+            // Note: setDataSource is thread-safe as long as you don't use the same retriever
+            // instance on multiple threads at the exact same time without synchronization.
+            // For this use case with a thread pool of 2, it's generally safe.
+            retriever.setDataSource(this, uri);
+            // The timestamp needs to be in microseconds for getFrameAtTime
+            return retriever.getScaledFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST, width, height);
+        } catch (Exception e) {
+            Log.e("ThumbnailGen", "Failed to get frame for " + uri + " at " + timestampMs, e);
+            return null;
+        } finally {
+            try {
+                retriever.release();
+            } catch (Exception e) {
+                Log.e("ThumbnailGen", "Failed to release retriever", e);
+            }
+        }
+        // We no longer release the retriever here. It will be released in onDestroy.
     }
+    /**
+     *----------------------------------------------------------------------------------------------------
+     *-----------------------------------GESTURE----------------------------------------------------------
+     *----------------------------------------------------------------------------------------------------
+     */
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-    }
-
-    //--------------gesture-------------------------
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        //Check if the user has lifted their finger ---
+        if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+            // If so, call our custom onGestureEnd method.
+            myGestureListener.onScrollEnd();
+        }
         return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event);
     }
 
-    private class MyGestureListener extends GestureDetector.SimpleOnGestureListener{
+    private class MyGestureListener extends GestureDetector.SimpleOnGestureListener {
+
+        long startTime;
+        boolean isScrolling = false;
+        boolean isPlaying = false;
+        @Override
+        public boolean onDown(@NonNull MotionEvent e) {
+            isScrolling = false;
+            startTime = SystemClock.uptimeMillis();
+
+            if (exoPlayer != null) {
+                isPlaying = exoPlayer.isPlaying();
+                exoPlayer.pause();
+            }
+            return true;
+        }
+
         @Override
         public boolean onScroll(@Nullable MotionEvent e1, @NonNull MotionEvent e2, float distanceX, float distanceY) {
+            isScrolling = true;
             long elapsedTime = SystemClock.uptimeMillis() - startTime;
-                float velocityX = distanceX / elapsedTime;
+            if(elapsedTime == 0) return true; // Skip scroll even if it's not scrolling
+            float velocityX = distanceX / elapsedTime;
             if(velocityX > 0) {
                 velocityX = 0 - velocityX;
             }
             if(velocityX > -99999) {
-                currentTime = exoPlayer.getCurrentPosition();
                 currentTime = (long) (exoPlayer.getCurrentPosition() + (distanceX * velocityX * 2));
-                exoPlayer.seekTo(currentTime);
-                binding.videoCurrentTimeTv.setText(formatDuration(currentTime));
-
-                setUpSelectedSegment();
-
-
+                if (Math.abs(exoPlayer.getCurrentPosition() - currentTime) > 10) { // 10ms threshold
+                    exoPlayer.seekTo(currentTime);
+                }
                 startTime = SystemClock.uptimeMillis();
+                binding.videoCurrentTimeTv.setText(formatDuration(currentTime));
+                int scrollX = (int) (currentTime / 1000.0 * pixelsPerSecond);
+                binding.timelineScrollView.scrollTo(scrollX, 0);
+                setUpSelectedSegment();
             }
 
-            return super.onScroll(e1, e2, distanceX, distanceY);
+            return true;
         }
 
+        @Override
+        public boolean onFling(@NonNull MotionEvent e1, @NonNull MotionEvent e2, float velocityX, float velocityY) {
+            onScrollEnd();
+            return true;
+        }
+
+        public void onScrollEnd() {
+            if (isScrolling) {
+                // Perform one final, precise seek to the exact end position.
+                exoPlayer.seekTo(currentTime);
+                if (isPlaying) exoPlayer.play();
+                isScrolling = false;
+            }
+        }
     }
 
 
-    // ------general functions----------
-    //---------Player--------------
+
+    /**
+     *----------------------------------------------------------------------------------------------------
+     *-----------------------------------General-functions------------------------------------------------
+     *----------------------------------------------------------------------------------------------------
+     */
+    //-----------------------------------Player-----------------------------------------------------------
     private void setUpPlayer(){
 
 
@@ -210,7 +266,7 @@ import java.util.concurrent.TimeUnit;
                 DatabaseProvider databaseProvider = new StandaloneDatabaseProvider(this);
                 exoPlayerCache = new SimpleCache(
                         cacheDir,
-                        new LeastRecentlyUsedCacheEvictor(5 * 1024 * 1024 * 1024), // 5 GB cache size
+                        new LeastRecentlyUsedCacheEvictor((Runtime.getRuntime().maxMemory() / 1024)/2),
                         databaseProvider
                 );
             }
@@ -306,20 +362,14 @@ import java.util.concurrent.TimeUnit;
         }
     }
     private void playVideo(){
-        binding.videoPlayBtn.setVisibility(View.INVISIBLE);
-        binding.videoPauseBtn.setVisibility(View.VISIBLE);
         exoPlayer.play();
     }
 
     private void pauseVideo(){
-        binding.videoPlayBtn.setVisibility(View.VISIBLE);
-        binding.videoPauseBtn.setVisibility(View.INVISIBLE);
         exoPlayer.pause();
     }
-    //-------cache----------------
+    //-----------------------------------Cache------------------------------------------------------------
     private void startPreloadingTasks() {
-
-
         // Task 1: Pre-cache videos in the background
         Future<?> videoCachingFuture = backgroundExecutor.submit(() -> {
             try {
@@ -349,30 +399,17 @@ import java.util.concurrent.TimeUnit;
             }
         });
 
-        // Task 2: Generate thumbnails in the background
-        Future<?> thumbnailGenerationFuture = backgroundExecutor.submit(() -> {
-            try {
-                for (VideoSegment segment : videoSegmentList) {
-                    generateThumbnailsForSegment(segment, pixelsPerSecond);
-                }
-                Log.d("ThumbnailGen", "Background thumbnail generation complete.");
-            } catch (Exception e) {
-                Log.e("ThumbnailGen", "Error generating thumbnails in background", e);
-            }
-        });
-
-        // Task 3: Wait for both tasks to finish, then update the UI
+        // Task 2: Wait for both tasks to finish, then update the UI
         backgroundExecutor.submit(() -> {
             try {
                 // Block and wait for both futures to complete
                 videoCachingFuture.get();
-                thumbnailGenerationFuture.get();
 
                 // Now that both tasks are done, post the final UI update to the main thread
                 mainThreadHandler.post(() -> {
+                    segmentAdapter.notifyDataSetChanged();
                     binding.loadingContainer.setVisibility(View.GONE);
                     binding.timelineScrollView.setEnabled(true);
-                    segmentAdapter.notifyDataSetChanged(); // Refresh adapter to show thumbnails
                     Log.d("PreCache", "All pre-loading tasks complete. UI is now active.");
                 });
             } catch (Exception e) {
@@ -381,9 +418,7 @@ import java.util.concurrent.TimeUnit;
         });
     }
 
-
-    //-------thumbnail------------
-
+    //-----------------------------------Thumbnail--------------------------------------------------------
     private void rebuildTimelineAndPlayer() {
         if (exoPlayer == null) return;
 
@@ -417,8 +452,28 @@ import java.util.concurrent.TimeUnit;
         binding.segmentRecyclerView.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         binding.segmentRecyclerView.setAdapter(segmentAdapter);
 
-        // 2. Set the initial data
         segmentAdapter.setSegments(videoSegmentList);
+
+        // Use a ViewTreeObserver to wait until the layout is complete.
+        binding.segmentRecyclerView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                // This is called after the layout pass is complete.
+                int height = binding.segmentRecyclerView.getHeight();
+                if (height > 0) {
+                    // We got a valid height, so store it.
+                    timelineHeightPx = height;
+
+                    // Pass the height to the adapter.
+                    if (segmentAdapter != null) {
+                        segmentAdapter.setTimelineHeight(timelineHeightPx);
+                    }
+
+                    // Remove the listener so it doesn't fire again.
+                    binding.segmentRecyclerView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                }
+            }
+        });
 
         // 3. set up padding
         // We need to wait for the layout to be drawn to get the width of the scroll view
@@ -454,12 +509,18 @@ import java.util.concurrent.TimeUnit;
                 if (currentTime > totalDuration) currentTime = totalDuration;
 
                 // Seek the player but only if the time has actually changed to avoid spamming ExoPlayer
-                if (Math.abs(exoPlayer.getCurrentPosition() - currentTime) > 100) { // 100ms threshold
+                if (Math.abs(exoPlayer.getCurrentPosition() - currentTime) > 500) { // 500ms threshold
                     exoPlayer.seekTo(currentTime);
                 }
 
                 binding.videoCurrentTimeTv.setText(formatDuration(currentTime));
                 setUpSelectedSegment();
+            }
+            else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                // Perform one final, precise seek to the exact end position.
+                binding.videoCurrentTimeTv.setText(formatDuration(currentTime));
+                exoPlayer.seekTo(currentTime);
+
             }
             // Return false so that the touch event is passed on to the HorizontalScrollView
             // to perform the actual scrolling. If we return true, scrolling will stop.
@@ -468,85 +529,7 @@ import java.util.concurrent.TimeUnit;
     }
 
 
-    /**
-     * This method is called by the SegmentAdapter to get thumbnails for a segment.
-     * It calculates how many thumbnails are needed based on the segment's width.
-     */
-    @Override
-    public List<Bitmap> generateThumbnailsForSegment(VideoSegment segment, double currentPixelsPerSecond) {
-        List<Bitmap> thumbnails = new ArrayList<>();
-
-        // --- DYNAMIC THUMBNAIL SIZING (from Layout) ---
-        // Get the actual measured height of the RecyclerView. This is the most robust way.
-        int thumbnailHeightPx = binding.segmentRecyclerView.getHeight();
-        if (thumbnailHeightPx <= 0) {
-            // Fallback using a hardcoded density-scaled value if the view hasn't been measured yet.
-            thumbnailHeightPx = (int) (100 * getResources().getDisplayMetrics().density);
-        }
-
-        // Calculate the thumbnail width based on the video's aspect ratio and our dynamic height.
-        int videoWidth = segment.getWidth();
-        int videoHeight = segment.getHeight();
-        if (videoWidth <= 0 || videoHeight <= 0) {
-            videoWidth = 1; videoHeight = 1; // Avoid division by zero
-        }
-        double aspectRatio = (double) videoWidth / videoHeight;
-        int thumbnailWidth = (int) (thumbnailHeightPx * aspectRatio);
-        if (thumbnailWidth <= 0) thumbnailWidth = thumbnailHeightPx;
-
-        int segmentWidthInPixels = (int) (segment.getDuration() / 1000.0 * currentPixelsPerSecond);
-        int numThumbnails = (int) Math.ceil((double) segmentWidthInPixels / thumbnailWidth);
-
-        if (numThumbnails <= 0) return thumbnails;
-
-        // Use floating-point division to prevent timeInterval from becoming zero on high zoom
-        double timeInterval = (double) segment.getDuration() / numThumbnails;
-        if (timeInterval <= 0) return thumbnails;
-
-        for (int i = 0; i < numThumbnails; i++) {
-            long timeMs = (long) (segment.getClippingStart() + (i * timeInterval));
-            String cacheKey = segment.getUri().toString() + "_" + timeMs;
-
-            Bitmap cachedBitmap = thumbnailCache.get(cacheKey);
-            if (cachedBitmap != null && !cachedBitmap.isRecycled()) {
-                thumbnails.add(cachedBitmap);
-                continue; // Already cached and valid, move to the next one
-            }
-
-            // If not in cache or cached version is bad, generate it.
-            // This block is now a self-contained, thread-safe operation for ONE thumbnail.
-            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-            try {
-                retriever.setDataSource(context, segment.getUri());
-                Bitmap frame = retriever.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST);
-
-                if (frame != null) {
-                    int scaledWidth = (int)(thumbnailHeightPx * ((double)frame.getWidth() / frame.getHeight()));
-                    Bitmap scaledBitmap = Bitmap.createScaledBitmap(frame, scaledWidth, thumbnailHeightPx, false);
-
-                    if (frame != scaledBitmap) {
-                        frame.recycle();
-                    }
-
-                    thumbnails.add(scaledBitmap);
-                    thumbnailCache.put(cacheKey, scaledBitmap);
-                }
-            } catch (Exception e) {
-                Log.e("ThumbnailGen", "Error generating thumbnail at " + timeMs, e);
-            } finally {
-                // Release the retriever immediately after this single use.
-                // Its release can no longer affect other bitmaps.
-                try {
-                    retriever.release();
-                } catch (IOException e) {
-                    Log.e("ThumbnailGen", "Error releasing retriever inside loop", e);
-                }
-            }
-        }
-        return thumbnails;
-    }
-
-    //----------segment--------------------
+    //-----------------------------------Segment----------------------------------------------------------
     private void iniSegment() {
         videoSegmentList = new ArrayList<>();
         Intent resultData = getIntent().getParcelableExtra("result_data");
@@ -721,7 +704,8 @@ import java.util.concurrent.TimeUnit;
         // Refresh everything
         rebuildTimelineAndPlayer();
     }
-    //------------Buttons--------------
+
+    //-----------------------------------Buttons-----------------------------------------------------------
     private void setUpBtns(){
         exoPlayer.addListener(new Player.Listener(){
             @Override
@@ -745,7 +729,7 @@ import java.util.concurrent.TimeUnit;
         binding.editCompleteBtn.setOnClickListener(view -> complete());
 
         binding.videoFullscreenBtn.setOnClickListener(view -> {
-            startVideoPlayerActivity(getIntent().getParcelableExtra("uri"));
+            startVideoPlayerActivity(videoSegmentList);
         });
 
         binding.editSplitBtn.setOnClickListener(view -> {
@@ -782,10 +766,7 @@ import java.util.concurrent.TimeUnit;
 
     }
 
-
-
-
-    //-------------format------------------
+    //-----------------------------------Format-----------------------------------------------------------
     public static String formatDuration(long durationMs) {
         if (durationMs == C.TIME_UNSET) {
             return "N/A"; // Or handle the case when duration is not available
@@ -799,7 +780,8 @@ import java.util.concurrent.TimeUnit;
         // Format the duration as hh:mm:ss.ms
         return String.format("%02d:%02d:%02d.%03d", hours, minutes, seconds, milliseconds);
     }
-    //--------------Clean Up------------------------
+
+    //-----------------------------------Clean-Up----------------------------------------------------------
     private void releaseResources() {
         Log.d("Cleanup", "Releasing resources...");
 
@@ -817,11 +799,6 @@ import java.util.concurrent.TimeUnit;
             exoPlayer.release();
             exoPlayer = null;
         }
-        // 3. Clear the thumbnail cache to free up memory
-//        if (thumbnailCache != null) {
-//            Log.d("Cleanup", "Evicting all thumbnails from memory cache.");
-//            thumbnailCache.evictAll();
-//        }
         // 4. Release the SimpleCache (disk cache)
         // This closes the database connection and file handles.
         if (exoPlayerCache != null) {
@@ -892,6 +869,7 @@ import java.util.concurrent.TimeUnit;
         //finish();
     }
 
+    //-----------------------------------Helpers-----------------------------------------------------------
     private void setAllButtonsEnabled(boolean isEnabled) {
         binding.editCompleteBtn.setEnabled(isEnabled);
         binding.editCancelBtn.setEnabled(isEnabled);
@@ -907,12 +885,13 @@ import java.util.concurrent.TimeUnit;
         // Add any other buttons or interactive views here
     }
 
-        //--------------new activity---------------------
+    //-----------------------------------New-Activity-----------------------------------------------------------
     //change to new segmentList+++++++++++++++++++++++++++++++++++++++++++++++
-    private void startVideoPlayerActivity(Uri uri) {
+    private void startVideoPlayerActivity(List<VideoSegment> SegmentList) {
+        exoPlayer.pause();
         Intent intent = new Intent(this, VideoPlayerActivity.class);
-        intent.putParcelableArrayListExtra("uriArrayList", uriArrayList);
-        intent.putExtra("uri", uri);
+        ArrayList<VideoSegment> segmentsToPass = new ArrayList<>(SegmentList); // cast List to an ArrayList
+        intent.putParcelableArrayListExtra("segmentList", segmentsToPass);
         intent.putExtra("currentTime", currentTime);
         fullScreenActivityResultLauncher.launch(intent);
     }
@@ -926,12 +905,12 @@ import java.util.concurrent.TimeUnit;
                     if (result.getResultCode() == Activity.RESULT_OK) {
                         currentTime = result.getData().getLongExtra("currentTime",0);
                         exoPlayer.seekTo(currentTime);
-
+                        exoPlayer.play();
                     }
                 }
             });
 
-    //--------system UI--------------
+    //-----------------------------------System-UI---------------------------------------------------------
     private void hideSystemUI() {
         View decorView = this.getWindow().getDecorView();
         int uiOptions = decorView.getSystemUiVisibility();

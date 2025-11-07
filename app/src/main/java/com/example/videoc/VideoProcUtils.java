@@ -90,6 +90,13 @@ public class VideoProcUtils {
         // Process the single segment.
         processSingleSegment(context, currentSegment, tempDir, segmentIndex, (processedParts) -> {
             // This is the callback for processSingleSegment.
+            // If processing a segment fails, processedParts will be empty. We should stop.
+            if (processedParts.isEmpty()) {
+                Log.e(TAG, "Processing failed for segment " + segmentIndex + ". Aborting concatenation.");
+                // Clean up and signal failure
+                concatenateParts(new ArrayList<>(), outputVideoPath, tempDir, finalCallback);
+                return;
+            }
             // It runs after the current segment is fully processed.
 
             intermediateFiles.addAll(processedParts);
@@ -122,7 +129,8 @@ public class VideoProcUtils {
         double endTimeSec = segment.getClippingEnd() / 1000.0;
 
         // --- STEP 2: Execute FFprobe to get all necessary information. ---
-        String ffprobeCommand = String.format("-v quiet -print_format json -show_format -show_streams -show_frames -select_streams v:0 -show_entries frame=key_frame,pts_time -i %s", safeReadPath);
+        String ffprobeCommand = String.format(Locale.US, "-v quiet -print_format json -show_format -show_streams -show_frames -select_streams v:0 -show_entries frame=key_frame,pts_time,pict_type -read_intervals %.3f%%+%.3f -i %s",
+                startTimeSec, (endTimeSec - startTimeSec), safeReadPath);
 
         FFprobeKit.executeAsync(ffprobeCommand, ffprobeSession -> {
             // --- STEP 3: The FFprobe is complete. Now, inside its callback, we process the result. ---
@@ -135,10 +143,30 @@ public class VideoProcUtils {
                 return;
             }
 
-            String durationStr = parseDuration(output);
-            double durationSec = 0.0;
-            if (durationStr != null) {
-                durationSec = Double.parseDouble(durationStr);
+            List<FrameInfo> allFrames = parseFrameInfo(output);
+            if (allFrames.isEmpty()) {
+                Log.e(TAG, "Could not parse any frame information. Re-encoding whole segment.");
+                return;
+            }
+
+            double copyableStart = -1; // The time we can start a lossless copy
+            double copyableEnd = -1;   // The time we can end a lossless copy
+
+            // Find the first I-frame at or after our start time
+            for (FrameInfo frame : allFrames) {
+                if ("I".equals(frame.pict_type) && frame.pts_time >= startTimeSec) {
+                    copyableStart = frame.pts_time;
+                    break;
+                }
+            }
+
+            // Find the last I-frame or P-frame at or before our end time
+            for (int i = allFrames.size() - 1; i >= 0; i--) {
+                FrameInfo frame = allFrames.get(i);
+                if (("I".equals(frame.pict_type) || "P".equals(frame.pict_type)) && frame.pts_time <= endTimeSec) {
+                    copyableEnd = frame.pts_time;
+                    break;
+                }
             }
 
             // Parse codec information from the FFprobe output.
@@ -151,68 +179,76 @@ public class VideoProcUtils {
                 return;
             }
 
-            // Parse keyframe times from the FFprobe output.
-            List<Double> keyframeTimes = parseKeyframeTimes(output);
-            double startKeyframe = findNearestKeyframe(keyframeTimes, startTimeSec, false, durationSec);
-            double endKeyframe = findNearestKeyframe(keyframeTimes, endTimeSec, true, durationSec);
+
 
             // --- STEP 4: Build the list of FFmpeg commands to execute for this segment. ---
             List<String> partsToProcess = new ArrayList<>();
             List<String> generatedParts = Collections.synchronizedList(new ArrayList<>());
-            String reEncodeVideoCmd = String.format("-c:v %s -preset ultrafast", videoCodec);
+            String reEncodeVideoCmd = String.format("-c:v %s -preset normal", videoCodec);
             String reEncodeAudioCmd = (audioCodec != null) ? String.format("-c:a %s", audioCodec) : "-an";
 
 
-            // We use a small tolerance (e.g., 0.1 seconds) to account for slight inaccuracies.
-            boolean isLossless = (Math.abs(startTimeSec - startKeyframe) < 0.1 && Math.abs(endTimeSec - endKeyframe) < 0.1);
+            // A small tolerance for floating point inaccuracies.
+            final double tolerance = 0.1;
+            boolean isPerfectLossless = (copyableStart != -1 && copyableEnd != -1 &&
+                    Math.abs(startTimeSec - copyableStart) < tolerance &&
+                    Math.abs(endTimeSec - copyableEnd) < tolerance);
 
-            if (isLossless) {
-                Log.d(TAG, "Segment " + segmentIndex + " is a candidate for a single lossless copy.");
-                String middlePartPath = new File(tempDir, String.format("part_%d_middle.ts", segmentIndex)).getAbsolutePath();
-                String middlePath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
-                //ADD THE h264_mp4toannexb BITSTREAM FILTER ---
-                String cmd = String.format(Locale.US, "-y -ss %.3f -to %.3f -i %s -c copy -bsf:v h264_mp4toannexb -avoid_negative_ts 1 \"%s\"",
-                        startTimeSec, endTimeSec, middlePath, middlePartPath);
+            if (isPerfectLossless) {
+                // --- PERFECT CASE: The segment aligns with I-frames, use a single copy command. ---
+                Log.d(TAG, "Segment " + segmentIndex + " is a perfect lossless candidate. Using single copy.");
+                String singleCopyPartPath = new File(tempDir, String.format("part_%d_single_copy.ts", segmentIndex)).getAbsolutePath();
+                String singleCopyPath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
+                String cmd = String.format(Locale.US, "-y -ss %.3f -to %.3f -i %s -c copy -bsf:v h264_mp4toannexb -avoid_negative_ts make_zero \"%s\"",
+                        startTimeSec, endTimeSec, singleCopyPath, singleCopyPartPath);
                 partsToProcess.add(cmd);
-                generatedParts.add(middlePartPath);
+                generatedParts.add(singleCopyPartPath);
+
             } else {
+                // --- COMPLEX CASE: Fallback to the head/middle/tail logic. ---
+                Log.d(TAG, "Segment " + segmentIndex + " is not a perfect candidate. Using head/middle/tail logic.");
 
-
-                // Build head, middle, and tail commands as before...
-                if (startTimeSec < startKeyframe) {
+                // Part 1: The "Head" (re-encode if start is not copyable)
+                if (copyableStart == -1 || startTimeSec < copyableStart) {
+                    double headEndTime = (copyableStart != -1) ? copyableStart : endTimeSec;
                     String headPartPath = new File(tempDir, String.format("part_%d_head.ts", segmentIndex)).getAbsolutePath();
-                    // IMPORTANT: We need a NEW SAF path for each command.
                     String headPath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
-                    String cmd = String.format(Locale.US, "-y -i %s -ss %.3f -to %.3f %s %s \"%s\"",
-                            headPath, startTimeSec, startKeyframe, reEncodeVideoCmd, reEncodeAudioCmd, headPartPath);
+                    String cmd = String.format(Locale.US, "-y -i %s -ss %.3f -to %.3f %s %s -bsf:v h264_mp4toannexb -avoid_negative_ts make_zero \"%s\"",
+                            headPath, startTimeSec, headEndTime, reEncodeVideoCmd, reEncodeAudioCmd, headPartPath);
                     partsToProcess.add(cmd);
                     generatedParts.add(headPartPath);
                 }
-                if (startKeyframe < endKeyframe) {
+
+                // Part 2: The "Middle" (lossless copy between I-frame and last I/P-frame)
+                if (copyableStart != -1 && copyableEnd != -1 && copyableEnd > copyableStart) {
                     String middlePartPath = new File(tempDir, String.format("part_%d_middle.ts", segmentIndex)).getAbsolutePath();
                     String middlePath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
-                    //ADD THE h264_mp4toannexb BITSTREAM FILTER ---
-                    String cmd = String.format(Locale.US, "-y -ss %.3f -to %.3f -i %s -c copy -bsf:v h264_mp4toannexb -avoid_negative_ts 1 \"%s\"",
-                            startKeyframe, endKeyframe, middlePath, middlePartPath);
+                    String cmd = String.format(Locale.US, "-y -ss %.3f -to %.3f -i %s -c copy -bsf:v h264_mp4toannexb -avoid_negative_ts make_zero \"%s\"",
+                            copyableStart, copyableEnd, middlePath, middlePartPath);
                     partsToProcess.add(cmd);
                     generatedParts.add(middlePartPath);
                 }
-                if (endTimeSec > endKeyframe && endKeyframe > startKeyframe) {
+
+                // Part 3: The "Tail" (re-encode if end is not copyable)
+                if (copyableEnd != -1 && endTimeSec > copyableEnd) {
                     String tailPartPath = new File(tempDir, String.format("part_%d_tail.ts", segmentIndex)).getAbsolutePath();
                     String tailPath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
-                    String cmd = String.format(Locale.US, "-y -i %s -ss %.3f -to %.3f %s %s \"%s\"",
-                            tailPath, endKeyframe, endTimeSec, reEncodeVideoCmd, reEncodeAudioCmd, tailPartPath);
+                    String cmd = String.format(Locale.US, "-y -i %s -ss %.3f -to %.3f %s %s -bsf:v h264_mp4toannexb -avoid_negative_ts make_zero \"%s\"",
+                            tailPath, copyableEnd, endTimeSec, reEncodeVideoCmd, reEncodeAudioCmd, tailPartPath);
                     partsToProcess.add(cmd);
                     generatedParts.add(tailPartPath);
                 }
-                if (partsToProcess.isEmpty()) {
-                    String singlePartPath = new File(tempDir, String.format("part_%d_single.ts", segmentIndex)).getAbsolutePath();
-                    String singlePath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
-                    String cmd = String.format(Locale.US, "-y -i %s -ss %.3f -to %.3f %s %s \"%s\"",
-                            singlePath, startTimeSec, endTimeSec, reEncodeVideoCmd, reEncodeAudioCmd, singlePartPath);
-                    partsToProcess.add(cmd);
-                    generatedParts.add(singlePartPath);
-                }
+            }
+
+            // Fallback: If for any reason no parts were generated, re-encode the whole thing.
+            if (partsToProcess.isEmpty()) {
+                Log.w(TAG, "Logic resulted in no parts for segment " + segmentIndex + ". Re-encoding entire segment as fallback.");
+                String singlePartPath = new File(tempDir, String.format("part_%d_single_reencode.ts", segmentIndex)).getAbsolutePath();
+                String singlePath = FFmpegKitConfig.getSafParameterForRead(context, segment.getUri());
+                String cmd = String.format(Locale.US, "-y -i %s -ss %.3f -to %.3f %s %s -bsf:v h264_mp4toannexb -avoid_negative_ts make_zero \"%s\"",
+                        singlePath, startTimeSec, endTimeSec, reEncodeVideoCmd, reEncodeAudioCmd, singlePartPath);
+                partsToProcess.add(cmd);
+                generatedParts.add(singlePartPath);
             }
 
             // --- STEP 5: Execute the FFmpeg commands for the parts sequentially. ---
@@ -242,22 +278,6 @@ public class VideoProcUtils {
         });
     }
 
-    private static String parseDuration(String ffprobeJson) {
-        try {
-            Gson gson = new Gson();
-            Map<String, Object> result = gson.fromJson(ffprobeJson, new TypeToken<Map<String, Object>>() {}.getType());
-            if (result.containsKey("format")) {
-                Map<String, Object> format = (Map<String, Object>) result.get("format");
-                if (format != null && format.containsKey("duration")) {
-                    return (String) format.get("duration");
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to parse duration from ffprobe JSON.", e);
-        }
-        return null;
-    }
-
 
     // Helper to parse codec from JSON, add this method to your class
     private static String parseCodec(String ffprobeJson, String codecType) {
@@ -284,91 +304,116 @@ public class VideoProcUtils {
     private static void concatenateParts(List<String> intermediateFiles, String outputVideoPath, File tempDir, FFmpegSessionCompleteCallback finalCallback) {
         if (intermediateFiles.isEmpty()) {
             Log.e(TAG, "No intermediate files to concatenate.");
+            cleanupTempFiles(tempDir);
             finalCallback.apply(FFmpegSession.create(new String[]{"-i", "invalid"})); // Create a failed session
             return;
         }
-        File concatFile = new File(tempDir, "concat_list.txt");
-        try (FileWriter writer = new FileWriter(concatFile)) {
-            for (String filePath : intermediateFiles) {
-                writer.write("file '" + filePath.replace("'", "'\\''") + "'\n");
+
+        StringBuilder concatInput = new StringBuilder("concat:");
+        for (int i = 0; i < intermediateFiles.size(); i++) {
+            // IMPORTANT: The file paths must be escaped for the FFmpeg command line.
+            // We are not writing to a file anymore, so we don't need to worry about single quotes in paths here.
+            concatInput.append(intermediateFiles.get(i));
+            if (i < intermediateFiles.size() - 1) {
+                concatInput.append("|");
             }
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to create concat file", e);
-            finalCallback.apply(FFmpegSession.create(new String[]{"-i", "invalid"}));
-            return;
         }
 
-        String finalCommand = String.format("-y -f concat -safe 0 -i \"%s\" -c copy \"%s\"", concatFile.getAbsolutePath(), outputVideoPath);
+        // --- NEW: The final command using the concat protocol ---
+        // We no longer need the concat_list.txt file or the -f concat -safe 0 flags.
+        String finalCommand = String.format("-y -i \"%s\" -c copy -movflags +faststart \"%s\"", concatInput.toString(), outputVideoPath);
+
+        Log.d(TAG, "Executing final concatenation command: " + finalCommand);
+
         FFmpegKit.executeAsync(finalCommand, session -> {
             // Clean up temp files
+            // We also need to delete the temp directory itself.
+
+//            // --- NEW: Create the debug video with frame numbers ---
+//            Log.d(TAG, "Main concatenation successful. Now creating debug video with frame numbers.");
+//
+//            // Construct the path for the debug output file.
+//            String debugOutputVideoPath = outputVideoPath.replace(".mp4", "_debug_frames.mp4");
+//
+//            // The drawtext filter requires a font file. FFmpeg on Android doesn't have a default path.
+//            // A common, safe font to use is DroidSansMono, which is usually available.
+//            String fontPath = "/system/fonts/DroidSansMono.ttf";
+//            String drawtextFilter = String.format("drawtext=fontfile=%s:text='%%{frame_num}':x=10:y=10:fontsize=48:fontcolor=white@0.8:box=1:boxcolor=black@0.5", fontPath);
+//
+//            String debugCommand = String.format("-y -i \"%s\" -vf \"%s\" -c:v libx264 -preset ultrafast -c:a copy -movflags +faststart \"%s\"",
+//                    outputVideoPath, // Input is the successfully concatenated video
+//                    drawtextFilter,
+//                    debugOutputVideoPath);
+//
+//
+//            Log.d(TAG, "Executing debug frame-number command: " + debugCommand);
+//
+//            // Execute the debug command synchronously within the callback for simplicity.
+//            FFmpegSession debugSession = FFmpegKit.execute(debugCommand);
+//            if (!ReturnCode.isSuccess(debugSession.getReturnCode())) {
+//                Log.e(TAG, "Failed to create debug video. RC: " + debugSession.getReturnCode());
+//                Log.e(TAG, "FFmpeg logs: " + debugSession.getOutput());
+//            } else {
+//                Log.d(TAG, "Successfully created debug video at: " + debugOutputVideoPath);
+//            }
+//            //end
+
+            finalCallback.apply(session);
+
+            if (!ReturnCode.isSuccess(session.getReturnCode())) {
+                Log.e(TAG, "Final concatenation failed! RC: " + session.getReturnCode());
+                Log.e(TAG, "FFmpeg logs: " + session.getOutput());
+
+            }
+
+            cleanupTempFiles(tempDir);
+
+        });
+    }
+
+
+
+    // --- Helper Methods ---
+
+    private static void cleanupTempFiles(File tempDir) {
+        if (tempDir != null && tempDir.exists()) {
             for (File file : tempDir.listFiles()) {
                 file.delete();
             }
             tempDir.delete();
-            finalCallback.apply(session);
-        });
+        }
     }
 
-    // --- Helper Methods ---
+    private static class FrameInfo {
+        double pts_time;
+        String pict_type; // "I", "P", or "B"
 
-    private static List<Double> parseKeyframeTimes(String ffprobeJsonOutput) {
-        List<Double> keyframeTimes = new ArrayList<>();
-        if (TextUtils.isEmpty(ffprobeJsonOutput)) return keyframeTimes;
-
+        public FrameInfo(double pts_time, String pict_type) {
+            this.pts_time = pts_time;
+            this.pict_type = pict_type;
+        }
+    }
+    private static List<FrameInfo> parseFrameInfo(String ffprobeJson) {
+        List<FrameInfo> frameInfoList = new ArrayList<>();
         try {
             Gson gson = new Gson();
-            // Use a generic Map to handle the complex JSON structure
-            Map<String, Object> result = gson.fromJson(ffprobeJsonOutput, new TypeToken<Map<String, Object>>() {}.getType());
+            Map<String, Object> result = gson.fromJson(ffprobeJson, new TypeToken<Map<String, Object>>() {}.getType());
 
-            // Check if the 'frames' key exists and is a List
-            if (result.containsKey("frames") && result.get("frames") instanceof List) {
+            if (result.containsKey("frames")) {
                 List<Map<String, Object>> frames = (List<Map<String, Object>>) result.get("frames");
-
-                for (Map<String, Object> frame : frames) {
-                    // Check for key_frame and pts_time, and handle different number types
-                    if (frame.containsKey("key_frame") && "1".equals(String.valueOf(frame.get("key_frame"))) && frame.containsKey("pts_time")) {
-                        Object ptsTimeObj = frame.get("pts_time");
-                        if (ptsTimeObj instanceof String) {
-                            keyframeTimes.add(Double.parseDouble((String) ptsTimeObj));
-                        } else if (ptsTimeObj instanceof Double) {
-                            keyframeTimes.add((Double) ptsTimeObj);
+                if (frames != null) {
+                    for (Map<String, Object> frame : frames) {
+                        if (frame != null && frame.containsKey("pts_time") && frame.containsKey("pict_type")) {
+                            double time = Double.parseDouble(String.valueOf(frame.get("pts_time")));
+                            String type = (String) frame.get("pict_type");
+                            frameInfoList.add(new FrameInfo(time, type));
                         }
                     }
                 }
             }
-        } catch (JsonSyntaxException | NumberFormatException e) {
-            Log.e(TAG, "Failed to parse ffprobe keyframe output.", e);
+        } catch (JsonSyntaxException | ClassCastException | NumberFormatException e) {
+            Log.e(TAG, "Failed to parse frame info from FFprobe JSON", e);
         }
-        return keyframeTimes;
-    }
-
-    private static double findNearestKeyframe(List<Double> keyframeTimes, double targetTime, boolean findPrevious, double duration) {
-        if (keyframeTimes.isEmpty()) {
-            // If no keyframes, return 0 for previous, and the clip's duration for next.
-            return findPrevious ? 0 : duration;
-        }
-
-        double closestKeyframe = -1.0;
-
-        if (findPrevious) { // Find the last keyframe BEFORE or AT the target time
-            for (double kfTime : keyframeTimes) {
-                if (kfTime <= targetTime) {
-                    closestKeyframe = Math.max(closestKeyframe, kfTime);
-                }
-            }
-            // If no keyframe is found before the target, it must be 0.
-            return closestKeyframe == -1.0 ? 0 : closestKeyframe;
-        } else { // Find the first keyframe AFTER or AT the target time
-            closestKeyframe = Double.MAX_VALUE;
-            for (double kfTime : keyframeTimes) {
-                if (kfTime >= targetTime) {
-                    closestKeyframe = Math.min(closestKeyframe, kfTime);
-                }
-            }
-            // --- THIS IS THE FIX ---
-            // If no keyframe is found after the target, it means we are at the end.
-            // Return the video's total duration instead of MAX_VALUE.
-            return closestKeyframe == Double.MAX_VALUE ? duration : closestKeyframe;
-        }
+        return frameInfoList;
     }
 }

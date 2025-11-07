@@ -8,7 +8,7 @@ android {
 
     defaultConfig {
         applicationId "com.example.videoc"
-        minSdk 24
+        minSdk 30
         targetSdk 35
         versionCode 1
         versionName "1.0"
@@ -32,7 +32,6 @@ android {
         viewBinding true
     }
 }
-
 dependencies {
     implementation "androidx.media3:media3-exoplayer:1.8.0"
     implementation "androidx.media3:media3-exoplayer-dash:1.8.0"

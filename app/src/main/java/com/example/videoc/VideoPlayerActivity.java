@@ -1,5 +1,6 @@
 package com.example.videoc;
 
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -18,34 +19,47 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.ClippingMediaSource;
 import androidx.media3.exoplayer.source.ConcatenatingMediaSource2;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 
 import com.example.videoc.databinding.ActivityVideoPlayerBinding;
-
+import android.widget.Toast;
 import java.util.ArrayList;
 
 @UnstableApi public class VideoPlayerActivity extends AppCompatActivity {
 
+    Context context;
     ExoPlayer exoPlayer;
-    MediaItem mediaItem;
     ActivityVideoPlayerBinding binding;
-    private long startTime;
     long currentTime;
     private GestureDetector gestureDetector;
-    boolean isScrolling = false;
+    private MyGestureListener myGestureListener;
+    ArrayList<VideoSegment> segmentList;
     Uri uri;
 
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        context = this;
         binding = ActivityVideoPlayerBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
         hideSystemUI();
-        gestureDetector = new GestureDetector(this, new VideoPlayerActivity.MyGestureListener());
-        currentTime = getIntent().getLongExtra("currentTime",0);
+
+        myGestureListener = new MyGestureListener();
+        gestureDetector = new GestureDetector(this, myGestureListener);
+        segmentList = getIntent().getParcelableArrayListExtra("segmentList");
+        currentTime = getIntent().getLongExtra("currentTime", 0);
+
+        if (segmentList == null || segmentList.isEmpty()) {
+            // Handle the error case where no segments were passed
+            Toast.makeText(this, "Error: No video data found.", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+
         setUpPlayer();
 
     }
@@ -75,51 +89,48 @@ import java.util.ArrayList;
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+
+        //Check if the user has lifted their finger ---
+        if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+            // If so, call our custom onGestureEnd method.
+            myGestureListener.onScrollEnd();
+        }
         return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event);
     }
 
     private void setUpPlayer() {
-        ArrayList<Uri> uriArrayList = new ArrayList<Uri>();
-        uriArrayList = getIntent().getParcelableArrayListExtra("uriArrayList");
+        exoPlayer = new ExoPlayer.Builder(this).build();
+        binding.videoLoader.setPlayer(exoPlayer);
+        binding.videoLoaderController.setPlayer(exoPlayer);
+        DataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(context);
+        MediaSource.Factory factory = new ProgressiveMediaSource.Factory(dataSourceFactory);
 
-        //uri = getIntent().getParcelableExtra("uri");
-        if (uriArrayList != null) {
-            DataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(this);
-            MediaSource.Factory factory = new ProgressiveMediaSource.Factory(dataSourceFactory);
+        if(segmentList != null) {
 
             ConcatenatingMediaSource2.Builder concatenatingMediaSourceBuilder = new ConcatenatingMediaSource2.Builder();
+            for (VideoSegment videoSegment : segmentList) {
+                MediaSource mediaSource1 = new ClippingMediaSource(factory.createMediaSource(MediaItem.fromUri(videoSegment.getUri())),
+                        videoSegment.getClippingStart()*1000,
+                        videoSegment.getClippingEnd()*1000);
+                concatenatingMediaSourceBuilder.add(mediaSource1);
 
-            for(Uri uri : uriArrayList){
-                concatenatingMediaSourceBuilder.add(factory.createMediaSource(MediaItem.fromUri(uri)),0);
             }
-
-            exoPlayer = new ExoPlayer.Builder(VideoPlayerActivity.this).build();
-            //mediaItem = MediaItem.fromUri(uri);
-            binding.videoLoaderController.setPlayer(exoPlayer);
-            binding.videoLoader.setPlayer(exoPlayer);
-            binding.videoLoader.setKeepScreenOn(true);
-            //exoPlayer.setMediaItem(mediaItem);
             exoPlayer.setMediaSource(concatenatingMediaSourceBuilder.build());
             exoPlayer.prepare();
-            exoPlayer.setPlayWhenReady(true);
-            exoPlayer.addListener(new Player.Listener() {
-                @Override
-                public void onTimelineChanged(Timeline timeline, int reason) {
-                    Player.Listener.super.onTimelineChanged(timeline, reason);
-                    exoPlayer.seekTo(currentTime);
-                }
-            });
+            exoPlayer.seekTo(currentTime); // Start at the correct time
+            exoPlayer.play();
         }
-        binding.videoLoader.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View view, MotionEvent motionEvent) {
-                toggleLayoutVisibility();
-                return false;
-            }
-        });
+
+//        binding.videoLoader.setOnTouchListener(new View.OnTouchListener() {
+//            @Override
+//            public boolean onTouch(View view, MotionEvent motionEvent) {
+//                toggleLayoutVisibility();
+//                return false;
+//            }
+//        });
 
         binding.editCancelBtn.setOnClickListener(view -> {
-            onBackPressed();
+//            onBackPressed();
             long currentTime = exoPlayer.getCurrentPosition();
             Intent resultIntent = new Intent();
             resultIntent.putExtra("currentTime", currentTime);
@@ -129,15 +140,24 @@ import java.util.ArrayList;
     }
 
     private void toggleLayoutVisibility() {
-        if(!isScrolling){
-            if (binding.videoLoaderController.isShown()) {
-                binding.videoLoaderController.hide();
-            } else {
+        if (binding.videoLoaderController.isShown()) {
+            binding.videoLoaderController.hide();
+        } else {
                 binding.videoLoaderController.show();
-            }
         }
     }
     private class MyGestureListener extends GestureDetector.SimpleOnGestureListener{
+
+        long startTime;
+        boolean isScrolling = false;
+        @Override
+        public boolean onDown(@NonNull MotionEvent e) {
+            isScrolling = false;
+            startTime = SystemClock.uptimeMillis();
+            exoPlayer.pause();
+            return true;
+        }
+
         @Override
         public boolean onScroll(@Nullable MotionEvent e1, @NonNull MotionEvent e2, float distanceX, float distanceY) {
             isScrolling = true;
@@ -148,19 +168,36 @@ import java.util.ArrayList;
                 velocityX = 0 - velocityX;
             }
             if(velocityX > -99999) {
-                currentTime = exoPlayer.getCurrentPosition();
                 currentTime = (long) (exoPlayer.getCurrentPosition() + (distanceX * velocityX * 2));
-                exoPlayer.seekTo(currentTime);
+                if (Math.abs(exoPlayer.getCurrentPosition() - currentTime) > 10) { // 10ms threshold
+                    exoPlayer.seekTo(currentTime);
+                }
                 startTime = SystemClock.uptimeMillis();
             }
 
-            return super.onScroll(e1, e2, distanceX, distanceY);
+            return true;
         }
 
+        public void onScrollEnd() {
+            if (isScrolling) {
+                // --- 3. FINAL SEEK ON LIFT ---
+                // Perform one final, precise seek to the exact end position.
+                exoPlayer.seekTo(currentTime);
+                exoPlayer.play();
+                // Hide the loader and reset the flag
+                binding.videoLoaderController.hide();
+                isScrolling = false;
+            }
+        }
+
+
         @Override
-        public boolean onDown(@NonNull MotionEvent e) {
-            isScrolling = false;
-            return super.onDown(e);
+        public boolean onSingleTapUp(MotionEvent e) {
+            // Handle showing/hiding controls on a simple tap
+            if(!this.isScrolling) {
+                toggleLayoutVisibility();
+            }
+            return true;
         }
     }
     private void hideSystemUI() {
