@@ -5,10 +5,11 @@ An Android application for cutting and merging videos while maintaining original
 Built using **Java** and **FFmpeg**, this app aims to overcome common keyframe limitations in video editing.
 
 ## ✅ Features
-- [ ] Cut video segments without losing quality
-- [ ] Merge multiple videos seamlessly
-- [ ] Split between keyframes
+- [x] Cut video segments without losing quality
+- [x] Merge multiple videos seamlessly
+- [x] Split between keyframes
 - currently working on UI
+- current porting FFMPEG to improve export 
   
 ## 🛠 Tech Stack
 - **Language:** Java
